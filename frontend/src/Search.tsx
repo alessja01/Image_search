@@ -43,7 +43,7 @@ export default function Search() {
   const [embedding, setEmbedding] = useState<number[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  //const [showSidebar, setShowSidebar] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
   const [tokenExpired, setTokenExpired] = useState(false);
   const [selectedImage, setSelectedImage] = useState<any | null>(null);
 
@@ -166,16 +166,59 @@ export default function Search() {
     }
   };
 
+
+
   return (
     <main
-      className="w-full min-h-screen bg-cover bg-center relative"
-      style={{ backgroundImage: `url(${background_searchimage})` }}
+      className="w-full h-screen bg-cover bg-center flex relative"
+      style={{
+        backgroundImage: `url(${background_searchimage})`,
+        backgroundSize: "cover",
+        backgroundRepeat: "no-repeat",
+        backgroundPosition: "center",
+      }}
     >
+
+      {/* Area di attivazione della sidebar */}
+      <div
+        onMouseEnter={() => setShowSidebar(true)}
+        className="fixed top-0 left-0 h-full w-4 z-50"
+      ></div>
+
+      {/* Sidebar */}
+      <div
+        onMouseLeave={() => setShowSidebar(false)}
+        className={`fixed top-0 left-0 h-full bg-white/60 backdrop-blur-sm shadow-lg transition-transform duration-300 z-40 ${
+          showSidebar ? "translate-x-0" : "-translate-x-full"
+        } w-64`}
+      >
+        <div className="p-4 h-full flex flex-col">
+          {/* logo in alto */}
+          <div className="flex items-center mb-6">
+            <img
+              src="https://c.animaapp.com/m9mxsnmi2Oh80t/img/frame-5.png"
+              alt="Logo"
+              className="w-8 h-8 mr-2"
+            />
+            <span className="text-l font-semibold text-black">Federico II</span>
+          </div>
+
+            {/* voci centrale verticalmente */}
+          <nav className="flex-1 flex flex-col justify-center items-center space-y-4">
+            <a href="/gallery" className="text-black text-sm font-semibold">Visualizza Database</a>
+            <a href="/upload" className="text-black text-sm font-semibold">Carica Immagine</a>
+            <a href="/dashboard" className="text-black text-sm font-semibold">Dashboard</a>
+          </nav>
+        </div>
+      </div>  
+
       {/* Upload */}
       <div className="p-8 max-w-5xl mx-auto w-full">
         <h1 className="text-3xl font-bold mb-6 text-center text-black">
           Carica un'immagine per cercare
         </h1>
+
+
         <Card className="bg-gray-100 rounded-lg shadow-lg">
           <CardContent className="p-10">
             <form onSubmit={handleSearch} className="space-y-7">
