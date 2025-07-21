@@ -1,3 +1,4 @@
+from app.inference import loadAllOneVsAllModels, loadDevice
 from flask import Flask, jsonify, request
 from config import Config
 from models import db
@@ -38,7 +39,6 @@ def revoked_token_callback(jwt_header, jwt_payload):
 #inizializza db
 db.init_app(app)
 
-
 #registrazione routes
 app.register_blueprint(routes, url_prefix='/api')
 
@@ -60,7 +60,20 @@ if __name__ == '__main__' :
         conn=db.engine.raw_connection()
         register_vector(conn, "vector")
         conn.close()
-        
-        db.create_all()  # Crea tutte le tabelle
+
+        # Crea tutte le tabelle
+        db.create_all()
         print("Tabelle create con successo!")
+        
+
+        #Caricamento modelli One-vs-All
+        device= loadDevice(forceCpu=False)
+        models_one, className_one= loadAllOneVsAllModels("model_weights/model/OnevsAll_Full_Augmented_privato", device)
+
+        #Salvo nei config per accesso ai routes 
+        app.config["DEVICE"]=device
+        app.config["MODELS_ONEVSALL"]=models_one
+        app.config["CLASSNAMES_ONEVSALL"]=className_one
+
+
     app.run(debug=True)

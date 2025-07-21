@@ -126,8 +126,8 @@ const UploadImageForm = () => {
       }
 
       if (data.message === "Immagine caricata con successo") {
-        const categoriaServer = data.categoria || "(non specificata)";
-        alert(`✅ Immagine caricata con successo!\nCategoria: ${categoriaServer}`);
+        
+        alert(`✅ Immagine caricata con successo!`);
       } else {
         setErrorMessage(data.message || "Errore durante il caricamento.");
       }
@@ -281,19 +281,24 @@ const UploadImageForm = () => {
         </AlertDialog>
 
         {/* Dialog token scaduto */}
-        <AlertDialog open={tokenExpired} onOpenChange={setTokenExpired}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Sessione scaduta</AlertDialogTitle>
-              <AlertDialogDescription>
-                La tua sessione è scaduta, effettua di nuovo il login.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => setTokenExpired(false)}>Chiudi</AlertDialogCancel>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+      {/* Dialog token scaduto */}
+      <AlertDialog open={tokenExpired} onOpenChange={setTokenExpired}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sessione scaduta</AlertDialogTitle>
+            <AlertDialogDescription>
+              La tua sessione è scaduta, effettua di nuovo il login.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setTokenExpired(false)}>Chiudi</AlertDialogCancel>
+            <AlertDialogAction onClick={() => window.location.href = "/login"}>
+              Login
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       </div>
     </main>
   );

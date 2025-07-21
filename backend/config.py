@@ -18,11 +18,17 @@ class Config:
     JWT_HEADER_NAME = 'Authorization'
     JWT_HEADER_TYPE = 'Bearer'    
   
-
+    #Cartella upload immagini
     UPLOAD_FOLDER = os.path.join(os.getcwd(), 'uploads')  # cartella per salvataggio immagini
     # Verifica se la cartella esiste, altrimenti la crea
     if not os.path.exists(UPLOAD_FOLDER):
         os.makedirs(UPLOAD_FOLDER)
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
 
-    
+    #Parametri modello neurale
+    MODEL_PATH= os.path.join(os.getcwd(),'model_weights','model.pt') #file della prof
+    CLASS_SIZE= 6
+    FORCE_CPU= True
+
+    #One-vs-All
+    ONEVSALL_MODELS_DIR = os.path.join(os.getcwd(), 'model_weights', 'onevsall')  # Directory con le sottocartelle modello

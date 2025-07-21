@@ -5,6 +5,8 @@ from config import Config
 from utils import get_image_embedding, allowed_file
 from flask import Blueprint , request, jsonify, url_for, abort #request: legge i dati che l'utente invia/jsonify: restituisce risposte in formto JSON
 from datetime import datetime
+from collections import defaultdict
+
 
 #SQLAlchemy 
 from sqlalchemy import func #importa func
@@ -22,7 +24,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 #DEBUG AVANZATO
 import traceback
-
+import os
+import base64
 
 routes = Blueprint('routes', __name__)
 
@@ -143,7 +146,7 @@ def upload_image():
         if embedding is None:   
             return jsonify({'message': 'Embedding mancante'}), 400
         
-        print(f"Embedding calcolato: {embedding}")
+        print(f"Embedding calcolato e normalizzato: {embedding}")
 
         # Gestione della categoria
         category_obj = None
@@ -296,172 +299,199 @@ def serve_image(image_id):
         return jsonify({"message": "Immagine non trovata"}), 404
     return image.image, 200, {'Content-Type': 'image/jpeg'}
 
-#******************************************************* SEARCH *************************************************************
+# ******************************************************* SEARCH *************************************************************
 @routes.route('/search-image', methods=['POST'])
 @jwt_required()
 def search_image():
     try:
-        #ottengo l'id dal token JWT
-        user_id = int(get_jwt_identity())  # get_jwt_identity() decodifica automaticamente il token
+        # Ottieni l'ID utente dal token JWT
+        user_id = int(get_jwt_identity())
         print(f"ID dell'utente: {user_id}")
 
-        # Ottieni l'immagine e la categoria dalla richiesta
-        file = request.files.get('image')  # Ottieni il file inviato
+        # Ottieni immagine dalla richiesta
+        file = request.files.get('image')
 
         if not file:
             return jsonify({'message': 'Devi caricare un\'immagine'}), 400
-        
-        # Verifica che il file sia un'immagine con estensione valida
+
         if not allowed_file(file.filename):
             return jsonify({'message': 'Tipo di file non supportato'}), 422
 
-        # Leggi i dati binari dell'immagine e calcola l'embedding
+        # Calcola embedding dell'immagine
         image_data = file.read()
         embedding = get_image_embedding(image_data)
 
-        #se l'embedding non è stato trovato
-        if embedding is None:   
+        if embedding is None:
             return jsonify({'message': 'Embedding mancante'}), 400
-        
-        
-        print(f"Embedding calcolato: {embedding}")
 
-        #Predizione categoria
-        # se il database non contiene immagini non la puoi predire => errore
+        print(f"Embedding calcolato e normalizzato: {embedding[:10]}...")  # solo i primi valori per debug
+
+        # Se il DB è vuoto, errore
         immagini_presenti = Images.query.count()
         if immagini_presenti == 0:
-            return jsonify({'message': 'Il database è vuoto, è necessario inserire almeno una categoria per procedere'}), 400
-            
-        
-        #Recupera tutte le immagini simili ordinate per similarità decrescente
-        #recupera id e category id da ogni immagine nel db 
-        #calcola la distanz euclidea approssimata
-        #faccio un cast che serve a contenere l'embedding Python in un tipo compatibile a pgvector
-        similar_image= db.session.execute(
+            return jsonify({
+                'message': 'Il database è vuoto, è necessario inserire almeno una categoria per procedere'
+            }), 400
+
+        # Se esiste già un'immagine con lo stesso filename, ritorna solo quella
+        existing = Images.query.filter_by(filename=file.filename).first()
+        if existing:
+            return jsonify({
+                'predicted_category': existing.category.nome if existing.category else "Sconosciuta",
+                'total_categories_found': 1,
+                'matching_category_count': 1,
+                'total_result': 1,
+                'result': [{
+                    'id': existing.id,
+                    'filename': existing.filename,
+                    'category': existing.category.nome if existing.category else "Sconosciuta",
+                    'similarity': 1.0,
+                    'image_url': f"http://localhost:5000/api/image/{existing.id}"
+                }],
+                'all_categories': [{
+                    'id': existing.category.id if existing.category else -1,
+                    'nome': existing.category.nome if existing.category else "Sconosciuta"
+                }],
+                'embedding': embedding
+            }), 200
+
+        # Query immagini simili usando pgvector
+        similar_image = db.session.execute(
             text("""
                 SELECT id, category_id, embedding <-> CAST(:embedding AS vector) AS distance
                 FROM images 
-                ORDER BY distance 
+                ORDER BY distance
             """),
-            {'embedding': embedding} # è un dizionario che collega embedding nella tua query al valore dell'array numerico.
-        ).mappings().fetchall()#mappings:restituisce il risulato della query SQL come un oggetto adatto a python e non come un oggetto sqlalchemy
-            #fethcall: Restituisce tutti i risultati di una query SQL 
-        
+            {'embedding': embedding}
+        ).mappings().fetchall()
 
-        #Recura gli ID delle immagini
-        image_ids=[row['id'] for row in similar_image] #estrae gli id delle immagini simili dalla lista similar_images
+        # Recupera gli ID e oggetti immagini
+        image_ids = [row['id'] for row in similar_image]
         image_objects = Images.query.filter(Images.id.in_(image_ids)).all()
-        # recupera gli oggetti images dal database corrispondente a quegli ID 
-        image_map={img.id: img for img in image_objects}# crea un dizionario per accesso rapido agli oggetti tramite ID
+        image_map = {img.id: img for img in image_objects}
 
-
-        #Costruisci una lista ordinata 
-        result_image = []  # Lista finale di immagini da restituire
-        category_found = set()  # Set per raccogliere i nomi delle categorie distinte
+        result_image = []
+        category_found = set()
+        categories_objects = {}
 
         for row in similar_image:
-            img = image_map.get(row['id'])  # ottieni l'immagine dal dizionario
+            similarity = round(1.0 - row['distance'], 4)
+            if similarity < 0.40:
+                continue
+
+            img = image_map.get(row['id'])
             if not img:
-                continue  # Salta se non trovata
+                continue
 
             category_name = img.category.nome if img.category else "Sconosciuta"
-            if category_name != "Sconosciuta":
-                category_found.add(category_name)
+            category_id = img.category.id if img.category else -1
 
             result_image.append({
                 'id': img.id,
                 'filename': img.filename,
                 'category': category_name,
-                'similarity': round(1.0 - row['distance'], 4),
+                'similarity': similarity,
                 'image_url': f"http://localhost:5000/api/image/{img.id}"
             })
 
+            if category_name != "Sconosciuta":
+                category_found.add(category_name)
+                categories_objects[category_id] = category_name
 
-        #Predizione categoria dalla prima immagine
-        predicted_category_name= result_image[0]['category'] if result_image else None
+        # Se nessuna immagine è risultata simile
+        if not result_image:
+            return jsonify({
+                'message': 'Nessuna immagine simile trovata nel database.',
+                'result': [],
+                'all_categories': [],
+                'embedding': embedding
+            }), 200
 
-        #Conta quante immagini hanno la stessa categoria predetta
-        same_category_count= sum(1 for img in result_image if img['category'] == predicted_category_name)
+        # Predizione categoria dalla prima immagine
+        predicted_category_name = result_image[0]['category']
+        same_category_count = sum(1 for img in result_image if img['category'] == predicted_category_name)
 
         return jsonify({
             'predicted_category': predicted_category_name,
             'total_categories_found': len(category_found),
             'matching_category_count': same_category_count,
             'total_result': len(result_image),
-            'result': result_image
-            
+            'result': result_image,
+            'all_categories': [{'id': k, 'nome': v} for k, v in categories_objects.items()],
+            'embedding': embedding
         }), 200
 
     except Exception as e:
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
-    
 
-#******************************************************* CONFIRM SEARCH *************************************************************
+
+# ******************************************************* CONFIRM SEARCH *************************************************************
 @routes.route('/confirm-search', methods=['POST'])
 @jwt_required()
 def confirm_search():
     try:
-        user_id = int(get_jwt_identity())  # Ottieni ID utente dal token
-        data = request.get_json()  # Ottieni i dati inviati dalla richiesta
-        
-        # Estrai i dati dalla richiesta
+        user_id = int(get_jwt_identity())
+        data = request.get_json()
+
         embedding = data.get('embedding')
         category_id = data.get('category_id')
         filename = data.get('filename')
+        
 
-        # Controlla se i dati necessari sono presenti
         if not embedding or not category_id or not filename:
-            return jsonify({'error': 'Dati mancanti. Assicurati di inviare embedding, category_id e filename.'}), 400
+            return jsonify({'message': 'Dati mancanti: embedding, category_id e filename sono obbligatori.'}), 400
+        
+        image_base64 = data.get('image')
+        if not image_base64 :
+            return jsonify({'error':'Dati mancanti'}),400
+        try:
+            image_base64=base64.b64decode(image_base64)
+        except Exception as e:
+            return jsonify({'error': 'Immagine base64 non valida'}),400
 
-        # Verifica che la categoria esista nel DB
+        # Verifica che la categoria esista
         category = Category.query.get(category_id)
         if not category:
-            return jsonify({'error': f'Categoria con ID {category_id} non trovata.'}), 404
+            return jsonify({'message': f'Categoria con ID {category_id} non trovata.'}), 404
 
-        # Crea un nuovo oggetto SearchResult
-        search_result = SearchResult(
-            query_embedding=embedding,
-            user_id=user_id
-        )
-        db.session.add(search_result)
-        db.session.commit()
-
-        # Trova l'immagine già esistente nel DB (se c'è)
+        # Controlla se il file esiste già nel database
         existing_image = Images.query.filter_by(filename=filename).first()
         if existing_image:
-            image_id = existing_image.id
-        else:
-            # Se l'immagine non esiste già, creiamo un nuovo record
-            new_image = Images(
-                filename=filename,
-                embedding=embedding,
-                user_id=user_id,
-                category_id=category_id
-            )
-            db.session.add(new_image)
-            db.session.commit()
-            image_id = new_image.id
+            return jsonify({'message': f"L'immagine '{filename}' è già presente nel database."}), 200
 
-        # Aggiungi il collegamento tra il risultato di ricerca e l'immagine selezionata
-        search_result_image = SearchResultImage(
-            search_result_id=search_result.id,
-            images_id=image_id
+        # Salva l’immagine su disco se fornita
+        if image_base64:
+            try:
+                image_data = base64.b64decode(image_base64)
+                save_dir = os.path.join("dataset", str(category_id))
+                os.makedirs(save_dir, exist_ok=True)
+                image_path = os.path.join(save_dir, filename)
+                with open(image_path, "wb") as f:
+                    f.write(image_data)
+            except Exception as img_err:
+                return jsonify({'message': f"Errore nel salvataggio dell'immagine: {str(img_err)}"}), 500
+
+        # Salva nel DB
+        new_image = Images(
+            filename=filename,
+            image=image_base64,
+            embedding=embedding,
+            user_id=user_id,
+            category_id=category_id
         )
-        db.session.add(search_result_image)
+        db.session.add(new_image)
         db.session.commit()
 
         return jsonify({
-            'message': 'Risultato di ricerca confermato con successo!',
-            'search_result_id': search_result.id,
-            'image_id': image_id,
+            'message': f"L'immagine '{filename}' è stata salvata nella categoria '{category.nome}' con successo.",
+            'image_id': new_image.id,
             'category_name': category.nome
-        }), 200
+        }), 201
 
     except Exception as e:
         traceback.print_exc()
-        return jsonify({'error': f"Errore: {str(e)}"}), 500
-
+        return jsonify({'message': f"Errore interno del server: {str(e)}"}), 500
 
 #******************************************************* DATE-RANGE DASHBOARD *************************************************************
 @routes.route('/image-count-by-range', methods=['GET'])

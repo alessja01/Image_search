@@ -22,7 +22,8 @@ import {
   AlertDialogFooter,
   AlertDialogTitle,
   AlertDialogDescription,
-  AlertDialogCancel
+  AlertDialogCancel,
+  AlertDialogAction
 } from "@/components/ui/alert-dialog";
 import {
   Table,
@@ -32,6 +33,9 @@ import {
   TableHeader,
   TableRow
 } from "@/components/ui/table";
+
+
+
 
 export default function Search() {
   const [image, setImage] = useState<File | null>(null);
@@ -46,6 +50,7 @@ export default function Search() {
   const [showSidebar, setShowSidebar] = useState(false);
   const [tokenExpired, setTokenExpired] = useState(false);
   const [selectedImage, setSelectedImage] = useState<any | null>(null);
+  const [successMessage, setSuccessMessage]= useState<string| null>(null)
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -132,7 +137,7 @@ export default function Search() {
   };
 
   const handleConfirm = async () => {
-    if (!embedding || !selectedCategoryId || !filename) {
+    if (!embedding || !selectedCategoryId || !filename || !image) {
       setError("Seleziona una categoria valida.");
       return;
     }
@@ -140,14 +145,17 @@ export default function Search() {
     setError(null);
     try {
       const token = localStorage.getItem("jwtToken") || "";
+      const imageBase64= await fileToBase64(image);
+
       const res = await fetch("http://localhost:5000/api/confirm-search", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ embedding, category_id: selectedCategoryId, filename })
+        body: JSON.stringify({ embedding, category_id: selectedCategoryId, filename , image: imageBase64})
       });
+
       const data = await res.json();
       if (!res.ok) {
         if (res.status === 401 && data.message?.toLowerCase().includes("scaduto")) {
@@ -157,7 +165,7 @@ export default function Search() {
         setError(data.message || "Errore nella conferma.");
         return;
       }
-      alert("✅ Categoria confermata con successo!");
+      setSuccessMessage("Categoria confermata con successo!");
     } catch (err) {
       console.error("Errore nella conferma:", err);
       setError("Errore di rete durante la conferma.");
@@ -166,6 +174,23 @@ export default function Search() {
     }
   };
 
+
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") {
+        const base64 = result.split(",")[1]; // rimuove header base64
+        resolve(base64);
+      } else {
+        reject(new Error("Errore nella conversione del file in base64."));
+      }
+    };
+    reader.onerror = (error) => reject(error);
+    reader.readAsDataURL(file);
+  });
+};
 
 
   return (
@@ -226,6 +251,10 @@ export default function Search() {
               <Button type="submit" disabled={isLoading}>
                 {isLoading ? <Progress /> : "Cerca immagine"}
               </Button>
+
+              {error &&(
+                <p className="text-red-600 text-sm">{error}</p>
+              )}
             </form>
           </CardContent>
         </Card>
@@ -260,7 +289,11 @@ export default function Search() {
               )}
             </SelectContent>
           </Select>
-
+          {/* MOSTRA IL BOTTONE SOLO SE LA CATEGORIA SCELTA E' DIVERSA DA QUELLA PREDETTA */}
+          {selectedCategoryId && 
+            categories.find((cat) => cat.id === selectedCategoryId)?.nome !== predictedCategory &&(
+              <Button onClick={handleConfirm} disabled={isLoading}>Conferma Categoria</Button>
+            )}
           </div>
         )}
 
@@ -318,7 +351,7 @@ export default function Search() {
           </div>
         )}
 
-        {error && <p className="text-red-600 text-sm mt-4">{error}</p>}
+        {successMessage && <p className="text-green-600 text-sm mt-4">{successMessage}</p>}
       </div>
 
       <AlertDialog open={tokenExpired} onOpenChange={setTokenExpired}>
@@ -331,6 +364,9 @@ export default function Search() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setTokenExpired(false)}>Chiudi</AlertDialogCancel>
+            <AlertDialogAction onClick={() => window.location.href = "/login"}>
+              Login
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
